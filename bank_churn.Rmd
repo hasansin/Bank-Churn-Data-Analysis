@@ -1,0 +1,1962 @@
+---
+title: "CMM - 703 -- Data Analysis"
+author: "D.N.H Weerasinghe - IIT ID --> 20240474, RGUID --> 2417932"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    keep_tex: true
+  word_document: default
+always_allow_html: true
+---
+
+### [**Load Packages**]{.underline}
+
+```{r load_required_packages}
+package_list <- c("reshape2","plotly","caret","smotefamily","glmnet","randomForest","tinytex","webshot2","shiny","DT")
+load_packages <- function(package_name){
+  #check if packages are installed. if not install them.
+  if (!require(package_name, character.only = TRUE)) install.packages(package_name, dependencies = TRUE)
+  #load libraries
+  library(package_name,character.only = TRUE)
+}
+
+lapply(package_list,load_packages)
+```
+
+### [Set image size for knitted file.]{.underline}
+
+```{r , warning=FALSE, message=FALSE}
+suppressMessages(suppressWarnings(webshot::install_phantomjs()))
+knitr::opts_chunk$set(
+  dev = "png",      # Render figures as PNG images
+  dpi = 250,
+  fig.retina = 2,
+  fig.width = 4,    # Adjust these values as needed (in inches)
+  fig.height = 5
+  
+)
+```
+
+# TASK 01
+
+### [1.1 Generate two important plots]{.underline} 
+
+```{r 1.1_Generate_two_important_plots}
+#checking current working directory
+getwd()
+
+#getall docs in current directory
+dir()
+
+#read csv to view data
+candy_data = read.table("/Users/naduniweerasinghe/CMM-703/candy-data.csv", sep = ",", header = TRUE , quote = "\"", stringsAsFactors = FALSE, na.strings = c("", "NA"))
+
+summary(candy_data)
+
+#check if data has missing values
+colSums(is.na(candy_data))
+
+#1. create a boxplot chart using data
+boxplot(candy_data$winpercent)
+boxplot(candy_data$sugarpercent)
+boxplot(candy_data$pricepercent)
+
+
+
+#2. create a pie chart using data
+pie(candy_data$winpercent,labels = candy_data$competitorname)
+
+```
+
+### [1.2 Discussion of how the plots can be improved and improved plots.]{.underline}
+
+#### [**1.2.1 plot 01- improved version of first plot**]{.underline}
+
+To improve we can add y-axis and x-axis names for box plot view. All box plots can be view in same page to make the comparison easy. Add a suitable title to understand the comparison.Other than that we can use a library like plotly to get animated results.Most importantly need to normalize price percent since it is in 0-100 rang and other two are in 0-1 range.
+
+```{r 1.2.1_plot_01-_improved_version_of_first_plot}
+
+# 1. Box plot
+# Normalize win percent
+candy_data$winpercent <- candy_data$winpercent / 100 # Divide by 100
+
+# Reshape data to long format for multiple box plots
+data_long <- data.frame(
+  Category = rep(c("Win Percent", "Sugar Percent", "Price Percent"), each = nrow(candy_data)),
+  Value = c(candy_data$winpercent, candy_data$sugarpercen, candy_data$pricepercent)
+)
+
+# Create the box plot
+boxplot_candy <- plot_ly(data_long,
+  x = ~Category, y = ~Value, type = "box",
+  boxpoints = "all", jitter = 0.3, pointpos = -1.8,
+  marker = list(color = "lightblue")
+) %>% layout(
+  title = "Comparison of Win Percent, Sugar Percent, and Price Percent",
+  xaxis = list(title = "Metrics"),
+  yaxis = list(title = "Percentage")
+)
+
+boxplot_candy
+```
+
+#### [**1.2.2 plot 02- improved version of second plot**]{.underline}
+
+In the second plot, unable to identify the each competitor since there are so many. Names are not clear. Percentages cannot be viewed & need a proper title as well.Most importantly the pie chart is not suitable to view the win percentage against the competitor since winning percentage is not a part of whole. We can use a bar plot instead of that. Can add the types of ingredients they have used or other details.
+
+```{r 1.2.2_plot_02-_improved_version_of_second_plot}
+
+#2. Bar plot
+
+ingredients <- c("chocolate","caramel","peanutyalmondy","nougat","crispedricewafer")
+candy_type <- c("hard","bar")
+colnames(candy_data)
+setdiff(ingredients,colnames(candy_data))
+
+candy_data$ingred_list <- apply(candy_data[,ingredients],1,function(candy){
+  in_list <- as.array(names(candy)[candy == 1])
+  return(if (length(in_list) == 0)  "NA" else paste(in_list, collapse = ", "))
+})
+
+
+candy_data$candy_type <- apply(candy_data[,candy_type],1,function(candy){
+  tp_list <- as.array(names(candy)[candy == 1])
+  return(if (length(tp_list) == 0)  "NA" else paste(tp_list, collapse = ", "))
+})
+
+candy_data$hover_text <- paste("Competitor:", candy_data$competitorname, "<br>","Ingredients:", candy_data$ingred_list, "<br>","Win Percent:", round(candy_data$winpercent*100,2), "%","<br>", "Candy type:",candy_data$candy_type)
+
+sorted_cndy_data <- candy_data[order(-candy_data$winpercent), ][1:20, ]
+
+sorted_cndy_data
+fig <- plot_ly(data.frame(sorted_cndy_data),
+  x = ~winpercent*100,
+  y = ~reorder(competitorname,winpercent),#sortcompetitor names based on the winning %
+  type = "bar",
+  text = ~hover_text,
+  hoverinfo = "text"
+) %>% layout(
+  title = "Candy Popularity Based on Win Percentage",
+  xaxis = list(title = "Winning Percentage (%)"),
+  yaxis = list(title = "Candy Name", tickfont = list(size = 8)),
+  margin = list(l = 150)  # Adjust left margin for readability
+)
+
+fig
+
+```
+
+# **TASK 02**
+
+## Task 2.1
+
+### [**2.1.1 Load the data set to the notebook**]{.underline}
+
+```{r 2.1.1_Load_the_data_set_to_the_notebook}
+#load the bank churn dataset
+bank_churn  <- read.table("/Users/naduniweerasinghe/CMM-703/Bank_Churn.csv", sep = "," , header = TRUE , quote = "\"", stringsAsFactors = FALSE, na.strings = c("", "NA"))
+```
+
+### [2.1.2 View first few records of data in the data set]{.underline}
+
+```{r 2.1.2_View_first_few_records_of_data_in_the_data_set}
+#view first few data rows in data set
+head(bank_churn)
+```
+
+### [2.1.3 View last few records in the data set]{.underline}
+
+```{r 2.1.3_View_last_few_records_in_the_data_set}
+#view last few data rows in dataset
+tail(bank_churn)
+```
+
+### [2.1.4 View summary of data]{.underline}
+
+```{r 2.1.4_View_summary_of_data}
+#view summary of data
+summary(bank_churn)
+```
+
+### [2.1.5 Check if any feature of data has missing values]{.underline}
+
+```{r 2.1.5_Check_if_any_feature_of_data_has_missing_values}
+#check for missing values in dataset
+colSums(is.na(bank_churn)) 
+```
+
+Since in above code result data shows that there aren't any missing values, visualize all data in data set to understand the spreed.
+
+### [2.1.6 View features in plots to get an idea about data]{.underline}
+
+```{r 2.1.6_View_features_in_plots_to_get_an_idea_about_data}
+#since in above code result data shows that there aren't any missing values, visualize all data in dataset to understand the spreed.
+
+#view all customer account balance for who customers not churned
+colnames(bank_churn)
+```
+
+#### [2.1.6.1 View Churned and Not Churned Customers]{.underline}
+
+```{r 2.1.6.1_View_Churned_and_Not_Churned_Customers}
+
+#barplot for churn and not churn
+churn_not_churned <- plot_ly(
+  as.data.frame(table(bank_churn$Exited)),
+  x = ~Var1 ,
+  y = ~Freq,
+  type = "bar",
+  color = ~factor(Var1),
+  colors = c("1" = "orange", "0" = "lightgreen")
+) %>%
+  layout(
+    title = "Churned and Not Churned Customers",
+    xaxis = list(
+      title = "Churn Status",
+      tickvals = c(0, 1),
+      ticktext = c("Not Churned", "Churned")
+    ),
+    yaxis = list(title = "Frequency"),
+    legend = list(title = list(text = 'Churn Status'))
+  )
+
+#view the plot
+churn_not_churned
+```
+
+#### [2.1.6.2 View Churn Customers Percentage By Country]{.underline}
+
+```{r 2.1.6.2_View_Churn_Customers_Percentage_By_Country}
+#count churned customer data by country
+
+#barplot for churn and not churn data by country
+ch_by_country <- plot_ly(
+  as.data.frame(table(bank_churn$Exited , bank_churn$Geography)),
+  x = ~ Var2,
+  y = ~ Freq,
+  type = "bar",
+  color = ~ factor(Var1),
+  colors = c("1" = "orange", "0" = "lightgreen")
+) %>%
+  layout(
+    title = "Churn Rate by Country",
+    xaxis = list(title = "Geography"),
+    yaxis = list(title = "Frequency"),
+    legend = list(title = list(text = 'Churn Status'))
+  )
+
+#view the plot
+ch_by_country
+```
+
+#### [2.1.6.3 View Churn Customers By Gender]{.underline}
+
+```{r 2.1.6.3_View_Churn_Customers_By_Gender}
+
+#count churned customer data by Gender
+table(bank_churn$Exited , bank_churn$Gender)
+
+#barplot for churn and not churn rate by gender
+ch_by_gender <- plot_ly(
+  as.data.frame(table(bank_churn$Exited , bank_churn$Gender)),
+  x = ~ Var2,
+  y = ~ Freq,
+  type = "bar",
+  color = ~ factor(Var1),
+  colors = c("1" = "orange", "0" = "lightgreen")
+) %>%
+  layout(
+    title = "Churn Rate by Gender",
+    xaxis = list(title = "Gender"),
+    yaxis = list(title = "Frequency"),
+    legend = list(title = list(text = 'Churn Status'))
+  )
+
+#view the plot
+ch_by_gender
+```
+
+#### [2.1.6.4 View Customers Percentages By Gender]{.underline}
+
+```{r 2.1.6.4_View_Customers_Percentages_By_Gender}
+
+
+#pie chart to view customer male female percentage
+ch_by_gender <- plot_ly(
+  as.data.frame(table(bank_churn$Gender)),
+  labels = ~ Var1,
+  values = ~ Freq,
+  type = "pie",
+  marker = list(colors = c("lightblue", "lightpink"))
+) %>%
+  layout(title = "Male/Femlae Count and Percentage", legend = list(title = list(text = 'Gender')))
+
+#view the plot
+ch_by_gender
+
+```
+
+#### [2.1.6.5 Churn Status Against Estimated Salary]{.underline}
+
+```{r 2.1.6.5_Churn_Status_Against_Estimated_Salary}
+
+plot_ly(data = bank_churn, x = ~EstimatedSalary, y = ~Exited, type = 'scatter', mode = 'markers',
+        marker = list(color = 'lightblue')) %>%
+  layout(title = 'Scatter Plot: Tenure vs Churn (Exited)',
+         xaxis = list(title = 'Tenure'),
+         yaxis = list(title = 'Exited (0 = No, 1 = Yes)'))
+
+```
+
+#### [2.1.6.6 View Correlation Between Features]{.underline}
+
+```{r 2.1.6.5_View_Correlation_Between_Features}
+
+#view correlation between features
+
+#get only numeric columns
+num_bank_churned <- bank_churn[sapply(bank_churn, is.numeric)]
+
+#calculate the correlation
+corelation_m <- cor(num_bank_churned, use = "complete.obs")
+
+#convert values to long format for Plotly
+corelation_d <- melt(corelation_m)
+
+correlation_plot <- plot_ly(
+  data = corelation_d,
+  #corelation data
+  x = ~ Var1,
+  #feature
+  y = ~ Var2,
+  #feature
+  z = ~ value,
+  # corelation value
+  type = "heatmap",
+  #plot type
+  colorscale = list(c(0, 0.5, 1), #position of colors (0 = lowest, 1 = highest)
+                    c("yellow", "orange", "red")  #color progression)
+  )) %>%
+    layout(
+      title = "Correlation Heatmap",
+      #title of plot
+      xaxis = list(title = "Features"),
+      yaxis = list(title = "Features")
+    )
+  
+  #view correlation plot
+  correlation_plot
+  
+
+
+```
+
+### [2.1.7 Remove irrelevant features like customer name and customerId]{.underline}
+
+```{r 2.1.7_Remove_irrelevant_features_like_customer_name_and_customerId}
+
+bank_churn <- bank_churn[, c(
+  "Geography",
+  "CreditScore",
+  "Gender",
+  "Age",
+  "Tenure",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary",
+  "Exited"
+)]
+
+```
+
+### [2.1.8 Check for Outliers in Numerical Data]{.underline}
+
+```{r 2.1.8_Check_for_Outliers_in_Numerical_Data}
+#check for outliers in numerical data
+
+#check outliers for Age,balance, credit score,estimated salary,tenture
+
+numerical_fr <- c("CreditScore",
+                  "Age",
+                  "Balance",
+                  "EstimatedSalary",
+                  "Tenure",
+                  "NumOfProducts")
+
+
+
+
+outlier_ck_nr <- sapply(numerical_fr,function(fr){
+  plot_ly(
+    data = bank_churn,
+    y = ~ bank_churn[[fr]],
+    type = 'box',
+    boxmean = TRUE
+  ) %>% layout(title = paste("Box Plot of", fr),
+               yaxis = list(title = fr))},simplify = FALSE)
+  
+  outlier_ck_nr
+```
+
+### [2.1.9 Define Methods to find Outliers & Find the Data Percentage to be Removed]{.underline}
+
+<div>
+
+```{r 2.1.9_Define_Methods_to_find_Outliers_&_Find_the_Data_Percentage_to_be_Removed}
+
+#As the above depicts, Age, NumOfProducts, and CreditScore have outliers. Next, we need to check if removing those values is safe by finding the number of rows that get removed from the dataset( if it is 5% or less it is safe & no data loss)
+
+#calculate IQR value 
+
+
+find_lower_upper_bound <- function(dataset, column) {
+  Q1 <- quantile(dataset[[column]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(dataset[[column]], 0.75, na.rm = TRUE)
+  IQR_value <- Q3 - Q1
+  
+  #find the lower bound and the upper bound
+  lower_bound <- Q1 - 1.5 * IQR_value
+  upper_bound <- Q3 + 1.5 * IQR_value
+  return(list(lower_bound = lower_bound, upper_bound = upper_bound))
+}
+
+# Function to find outliers using IQR
+find_outliers <- function(dataset, column) {
+  bound_data = find_lower_upper_bound(dataset, column)
+  # Count number of outliers
+  sum(dataset[[column]] < bound_data$lower_bound |
+        dataset[[column]] > bound_data$upper_bound,
+      na.rm = TRUE)
+}
+
+#check outlier count for each feature
+outlier_ct <- sapply(c("Age", "CreditScore", "NumOfProducts"), function(col)
+  find_outliers(bank_churn, col))
+print(outlier_ct)
+
+#check percentage of rows to be removed
+total_rows <- nrow(bank_churn)
+percentage_removed <- sum(outlier_ct) / total_rows * 100
+print(paste(
+  "Percentage of data to be removed:",
+  round(percentage_removed, 2),
+  "%"
+))
+
+```
+
+</div>
+
+### [2.1.10 **Define Method to Remove Outliers and View Features on Box plot after Outlier Removal**]{.underline}
+
+```{r 2.1.10_Define_Method_to_Remove_Outliers_and_View_Features_on_Box_plot_after_Outlier_Removal}
+
+#Since the above result depicts that the data percentage that gets removed by removing outliers is less than 5%( 4.34%), in the code below, the outlier of those features is removed.
+
+remove_outliers <- function(dataset, col){
+  bound_values <- find_lower_upper_bound(dataset,col)
+  print(paste(col,"Lower --->",bound_values$lower_bound,", Upper --->" ,bound_values$upper_bound))
+   filtered_data <- dataset[dataset[[col]] >= bound_values$lower_bound & dataset[[col]] <= bound_values$upper_bound, ]
+  return(filtered_data)
+}
+
+
+ #remove outliers of data repetively until all outlier get removed
+ ag_outlier_removed_data <- remove_outliers(bank_churn, "Age") 
+ cr_outlier_removed_data<- remove_outliers(ag_outlier_removed_data, "CreditScore") 
+ nm_outlier_removed_data <- remove_outliers(cr_outlier_removed_data, "NumOfProducts") 
+ ag2outlier_removed_data <- remove_outliers(nm_outlier_removed_data, "Age") 
+ ag3outlier_removed_data <- remove_outliers(ag2outlier_removed_data, "Age") 
+ cr2_outlier_removed_data<- remove_outliers(ag3outlier_removed_data, "CreditScore") 
+ df_outlier_removed_data <- as.data.frame(ag2outlier_removed_data) # Convert matrix to dataframe
+
+#check all outliers got removed
+for (fr in  numerical_fr){
+  
+  outlierremoved_plot <- plot_ly(
+    data = df_outlier_removed_data,
+    y = ~ df_outlier_removed_data[[fr]],
+    type = 'box',
+    boxmean = TRUE
+  ) %>% layout(title = paste(fr," Outlier Check"),
+               yaxis = list(title = fr))
+  
+  #view outlier removed  plot
+  print(outlierremoved_plot)
+
+  }
+ 
+#check outlier count for each feature
+outlier_ct01 <- sapply(c("Age", "CreditScore","NumOfProducts"), function(col) find_outliers(cr2_outlier_removed_data, col))
+print(outlier_ct01)
+```
+
+### [2.1.11 Convert Categorical Variables into Factors and Numerical data]{.underline}
+
+```{r 2.1.11_Convert_Categorical_Variables_into_Factors_and_Numerical_data}
+
+#next need convert categorical data in to factors values in order to use in regression model.
+
+
+# Convert categorical variables to factors
+df_outlier_removed_data$Geography <- as.factor(df_outlier_removed_data$Geography)
+df_outlier_removed_data$Gender <- as.factor(df_outlier_removed_data$Gender)
+df_outlier_removed_data$Exited <- factor(df_outlier_removed_data$Exited,levels = c(0, 1))
+df_outlier_removed_data$HasCrCard <- factor(df_outlier_removed_data$HasCrCard)
+df_outlier_removed_data$IsActiveMember <- factor(df_outlier_removed_data$IsActiveMember)
+
+#since above is not working with smote and both traning data testing data should have same format for each column. Next need to  convert categorcal data to numerical vectors.
+
+df_outlier_removed_data$Gender <- factor(df_outlier_removed_data$Gender,labels = c(0, 1))
+
+df_outlier_removed_data$Geography  <- factor(df_outlier_removed_data$Geography)
+
+
+# View structure after conversion
+str(df_outlier_removed_data)
+```
+
+### [2.1.12 Split Data into Test and Train data]{.underline}
+
+```{r 2.1.12_Split_Data_into_Test_and_Train_data}
+
+
+set.seed(123)
+
+#splitting the data set considering target variable since we need a balance exited = 1 and exited = 0 amout of data in both test and traning datasets.
+train_index <- createDataPartition(df_outlier_removed_data$Exited,
+                                   p = 0.8,
+                                   list = FALSE)
+
+#subset the data
+train_data <- df_outlier_removed_data[train_index, ]  # Training set (80%)
+test_data <- df_outlier_removed_data[-train_index, ]  # Testing set (20%)
+
+#check dimensions
+dim(train_data)
+dim(test_data)
+
+
+```
+
+### [2.1.13 Split Further into X and Y data]{.underline}
+
+```{r 2.1.13_Split_Further_into_X_and_Y_data}
+# seperate x and y data after data get spliited.
+
+x_train_data <- train_data[, c(
+  "Geography",
+  "CreditScore",
+  "Gender",
+  "Age",
+  "Tenure",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary"
+)]
+
+y_train_data <- train_data[, c("Exited")]
+
+x_test_data <- test_data[, c(
+  "Geography",
+  "CreditScore",
+  "Gender",
+  "Age",
+  "Tenure",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary"
+)]
+
+y_test_data <- test_data[, c("Exited")]
+
+```
+
+### [2.1.14 Feature Selection Using Correlation]{.underline}
+
+Feature selection is need to be done after training and test data get split if test data also participated in feature selection accuracy of model will be get higher since model can learn indirectly from unseen data which may lead to overfiting.
+
+```{r 2.1.14_Feature_Selection_Using_Correlation}
+
+#select important feature to traning the model using correlation
+
+important_features <- names(which(abs(corelation_m["Exited", ]) > 0.1))
+
+print(important_features)
+```
+
+### [2.1.15 Feature Selection Using Recursive Feature Elimination]{.underline}
+
+But since we have both categorical and numerical features using correlation might mislead. because of above reason it is best to use "Recursive Feature Elimination"
+
+```{r 2.1.15_Feature_Selection_Using_Recursive_Feature_Elimination}
+
+
+  #define RFE control using cross-validation
+  ctrl <- rfeControl(functions = rfFuncs,
+                     method = "cv",
+                     number = 5)
+  
+  #run RFE on training data
+  rfe_result <- rfe(x_train_data,
+                    #exclude target variable
+                    y_train_data,
+                    #target variable
+                    sizes = c(1:5),
+                    #number of features to select (1 to 5)
+                    rfeControl = ctrl)
+  
+  #print the selected features
+  print(rfe_result)
+ 
+  
+
+```
+
+### [**2.1.16 View If Target Feature Data is Imbalanced**]{.underline}
+
+View if target feature data is imbalanced to prevent from model getting bias towards the majority class.
+
+```{r 2.1.16_View_If_Target_Feature_Data_is_Imbalanced}
+
+#view summary of data
+summary(y_train_data)
+
+#view if the target class data is imbalanced
+
+ch_fr <- plot_ly(
+  as.data.frame(table(y_train_data)),
+  x = ~ y_train_data,
+  y = ~ Freq,
+  type = "bar",
+  color = ~ factor(y_train_data),
+  colors = c("1" = "orange", "0" = "lightgreen")
+) %>%
+  layout(
+    title = "View the Class Fequancy of the Data",
+    xaxis = list(title = "Classes (Not churned = 0 , Churned =1)",tickvals = c(0, 1),
+      ticktext = c("Not Churned", "Churned")),
+    yaxis = list(title = "Frequency"),
+    legend = list(title = list(text = 'Churn Status'))
+  )
+
+#view the plot
+ch_fr
+```
+
+Since above bar plot depict data of two classes in churn status is imbalanced. This need to be handled before training the model. Since the data set is not much large, SMOTE (Synthetic Minority Over-sampling Technique) will be used in next steps to balance the target data. This will improve model and avoid model prediction getting bias towards majority class.
+
+### [2.1.17 Use SMOTE to Generate More Data Points For minority Class]{.underline}
+
+```{r 2.1.17_Use_SMOTE_to_Generate_More_Data_Points_For_minority_Class}
+
+
+#apply one-hot encoding (convert factors to dummy variables)
+predictor_vars <- x_train_data %>%
+  mutate(across(where(is.factor), as.numeric))
+
+#check the structure
+str(predictor_vars)
+
+#apply SMOTE
+smote_result <- SMOTE(
+  X = predictor_vars,
+  target = y_train_data,
+  K = 2,
+  #number of nearest neighbors
+  dup_size = 3
+)          #oversampling rate
+
+#check class distribution after SMOTE
+table(smote_result$data$class)
+
+
+#check new class distribution
+
+class_counts <- table(smote_result$data$class)
+as.data.frame(class_counts)
+
+x_train_smote <- smote_result$data[, !names(smote_result$data) %in% "class"] 
+y_train_smote <- smote_result$data$class                              
+
+
+#view smote genrated data on barplot
+ch_fr_after_smt <- plot_ly(
+  as.data.frame(class_counts),
+  x = ~ Var1,
+  y = ~ Freq,
+  type = "bar",
+  color = ~ factor(Var1),
+  colors = c("1" = "orange", "0" = "lightgreen")
+) %>%
+  layout(
+    title = "View the Class Fequancy of the Data",
+    xaxis = list(
+      title = "Classes (Not churned = 0 , Churned =1)",
+      tickvals = c(0, 1),
+      ticktext = c("Not Churned", "Churned")
+    ),
+    yaxis = list(title = "Frequency"),
+    legend = list(title = list(text = 'Churn Status'))
+  )
+
+#view the plot
+ch_fr
+ch_fr_after_smt
+
+
+```
+
+## Task 2.2
+
+### [2.2.1 Train Logistic Regression Model and Random Forest Model to Predict Churn Status]{.underline}
+
+While using glm with the smote, It took a lot of time to produce the results used weights in glm to give more weight to 1 class(Exited).
+
+```{r 2.2.1_Train_Logistic_Regression_Model_and_Random_Forest_Model_to_Predict_Churn_Status}
+
+
+#use selected features from RFE
+selected_features_rf <- rfe_result$optVariables
+
+model_data_glm = data.frame(y_train_data,x_train_data)
+
+
+log_model_rw <- glm(y_train_data~ ., data = model_data_glm, family = binomial,weights = ifelse(model_data_glm$y_train_data == 1, 2, 1))
+
+#train Logistic Regression with selected features
+log_model <- glm(y_train_data~ ., data = model_data_glm, family = binomial,weights = ifelse(model_data_glm$y_train_data == 1, 2, 1))
+
+stepwise_log_model <- step(log_model, direction = "both", trace = 0)
+
+
+#train Random Forest with selected features
+rf_model <- randomForest(
+  y = y_train_data,
+  x = x_train_data[,c(selected_features_rf)],
+  ntree = 500,
+  mtry = 2,
+  sampsize = c(1000, 1000)
+)
+
+
+```
+
+## Task 2.3
+
+### [2.3.1 Make Predictions using Above Trained Models]{.underline}
+
+```{r 2.3.1_Make_Predictions_using_Above_Trained_Models}
+
+
+#make Predictions on Test Data
+log_predictions <- predict(stepwise_log_model, x_test_data, type = "response")
+log_pred_class <- ifelse(log_predictions > 0.5, 1, 0)
+log_pred_class <- as.factor(log_pred_class)
+
+log_pred_rw <- predict(log_model_rw, x_test_data, type = "response")
+log_pred_class_rw <- ifelse(log_pred_rw > 0.5, 1, 0)
+log_pred_class_rw  <- as.factor(log_pred_class_rw)
+
+rf_predictions<- predict(rf_model, x_test_data[, c(selected_features_rf)], type = "prob")[, 2]
+rf_pred_class <- ifelse(rf_predictions > 0.5, 1, 0)
+rf_pred_class <- factor(rf_pred_class)
+
+#evaluate Performance
+log_cm <- confusionMatrix(log_pred_class, y_test_data, positive = "1")
+log_cm_rw <- confusionMatrix(log_pred_class_rw, y_test_data, positive = "1")
+rf_cm <- confusionMatrix(rf_pred_class, y_test_data, positive = "1")
+
+
+print("Logistic Regression performance without step wise and feature selection:")
+print(log_cm_rw)
+
+print("Logistic Regression performance with step wise and feature selection:")
+print(log_cm)
+
+print("Random Forest Performance:")
+print(rf_cm)
+
+
+#get Recall, Precision, and F1-Score from Confusion Matrix
+accuracy <- log_cm$overall["Accuracy"]
+log_recall <- log_cm$byClass["Sensitivity"]   
+log_precision <- log_cm$byClass["Precision"] 
+log_f1 <- log_cm$byClass["F1"]    
+
+
+accuracy_rw <- log_cm_rw$overall["Accuracy"]
+log_recall_rw <- log_cm_rw$byClass["Sensitivity"]   
+log_precision_rw <- log_cm_rw$byClass["Precision"] 
+log_f1_rw <- log_cm_rw$byClass["F1"] 
+
+rf_acccuracy <- rf_cm$overall["Accuracy"]
+rf_recall <- rf_cm$byClass["Sensitivity"]
+rf_precision <- rf_cm$byClass["Precision"]
+rf_f1 <- rf_cm$byClass["F1"]
+
+#print Values
+cat(
+  "Logistic Regression with step wise - Recall:",
+  log_recall,
+  "Precision:",
+  log_precision,
+  "F1-Score:",
+  log_f1,
+  "\n"
+)
+
+cat(
+  "Logistic Regression without step wise - Recall:",
+  log_recall_rw,
+  "Precision:",
+  log_precision_rw,
+  "F1-Score:",
+  log_f1_rw,
+  "\n"
+)
+cat(
+  "Random Forest - Recall:",
+  rf_recall,
+  "Precision:",
+  rf_precision,
+  "F1-Score:",
+  rf_f1,
+  "\n"
+)
+
+
+```
+
+### [2.3.2 View Predicted Data in Plot]{.underline}
+
+```{r 2.3.2_View_Predicted_Data_in_Plot}
+
+model_redictions <- data.frame(
+  Model = rep(c('Logistic Regression With StepWise','Logistic Regression Without StepWise','Random Forest'), each = 4),
+  Metric = rep(c(
+    "Accuracy", "Recall", "Precision", "F1-Score"
+  ), times = 3),
+  Prediction = c(
+    accuracy,
+    log_recall,
+    log_precision,
+    log_f1,
+    accuracy_rw,
+    log_recall_rw,
+    log_precision_rw,
+    log_f1_rw,
+    rf_acccuracy,
+    rf_recall,
+    rf_precision,
+    rf_f1
+  ) * 100
+)
+
+model_metrics_prediction <- plot_ly(
+  model_redictions,
+  x = ~ Model,
+  y = ~ Prediction,
+  type = 'bar',
+  color = ~ Metric
+) %>%
+  layout(
+    title = "Model Prediction Comparison",
+    xaxis = list(title = "Metrics"),
+    yaxis = list(title = "Percentages"),
+    barmode = 'group',
+    showlegend = TRUE
+  )
+
+#view the plot
+model_metrics_prediction
+```
+
+### [2.3.3 View ROC Curve]{.underline}
+
+```{r 2.3.2_View_ROC_Curve}
+# Load pROC for ROC analysis
+library(pROC)
+
+# Compute ROC Curve
+log_roc <- roc(test_data$Exited, log_predictions)
+log_roc_rw <- roc(test_data$Exited, log_pred_rw)
+rf_roc <- roc(test_data$Exited, rf_predictions)
+
+# Compute AUC
+log_auc <- auc(log_roc)
+log_auc_rw <- auc(log_roc_rw)
+rf_auc <- auc(rf_roc)
+
+roc_data <- data.frame(
+  Model = rep(c('Logistic Regression with Stepwise','Logistic Regression without Stepwise', 'Random Forest'),times = c(length(log_roc$specificities),length(log_roc_rw$specificities), length(rf_roc$specificities))),
+  FPR = c(1 - log_roc$specificities,1 - log_roc_rw$specificities,1- rf_roc$specificities),  # False Positive Rate
+  TPR = c(log_roc$sensitivities ,log_roc_rw$sensitivities,rf_roc$sensitivities)       # True Positive Rate
+)
+
+plot_ly(roc_data, x = ~FPR, y = ~TPR, type = 'scatter', mode = 'lines',  color = ~Model
+) %>%
+  layout(
+    title = paste("ROC Curve Comparison (AUC: LR =", round(log_auc, 3), ", RF =", round(rf_auc, 3), ")"),
+    xaxis = list(title = 'False Positive Rate'),
+    yaxis = list(title = 'True Positive Rate')
+  )
+
+
+```
+
+Comparing the above result, we can understand that the random forest model is performing well with the data set. From statistical two models, the model used step wise to select the features has an increased accuracy, recall, f1-score precision. Since this is an imbalanced data set we need to compare all the metrics of the model to identify the best model. In the statistical models, the mode which uses stepwise has outperformed the model which did not use the stepwise method to select features since the all metrics of that model is higher that the other logistic regression model.
+
+## **Task 2.4**
+
+### [**2.4.1 Get the splitted data and separate x and y (label) data**]{.underline}
+
+```{r 2.4.1_Get_the_splitted_data_and_separate_x_and_y_(label)_data}
+
+
+set.seed(123)
+
+#splitting the data set considering target variable since we need a balance exited = 1 and exited = 0 amout of data in both test and traning datasets.
+train_index_tn <- createDataPartition(df_outlier_removed_data$Tenure,
+                                   p = 0.8,
+                                   list = FALSE)
+
+#subset the data
+train_data_tn <- df_outlier_removed_data[train_index_tn, ]  # Training set (80%)
+test_data_tn <- df_outlier_removed_data[-train_index_tn, ]  # Testing set (20%)
+
+#check dimensions
+dim(train_data_tn)
+dim(test_data_tn)
+
+#removed customerId and Surname since they not giving much important details for training the model
+x_train_data_tn <- train_data_tn[, c(
+  "Geography",
+  "CreditScore",
+  "Gender",
+  "Age",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary",
+  "Exited"
+)]
+
+y_train_data_tn <- train_data_tn$Tenure
+
+x_test_data_tn <- test_data_tn[, c(
+  "Geography",
+  "CreditScore",
+  "Gender",
+  "Age",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary",
+  "Exited"
+)]
+
+y_test_data_tn <- test_data_tn$Tenure
+```
+
+### [2.4.2 Select Features using RFE]{.underline}
+
+```{r 2.4.2_Select_Features_using_RFE}
+
+
+
+  #define RFE control using cross-validation
+  ctrl_tn <- rfeControl(functions = rfFuncs,
+                     method = "cv",
+                     number = 4)
+  
+  #run RFE on training data
+  rfe_result_tn <- rfe(x_train_data_tn,
+                    #exclude target variable
+                    y_train_data_tn,
+                    #target variable
+                    sizes = c(1:10),
+                    #number of features to select (1 to 10)
+                    rfeControl = ctrl)
+  
+  #print the selected features
+  print(rfe_result_tn)
+  
+
+ 
+  
+
+```
+
+### [2.4.3 **View Skewness of Target Variable**]{.underline}
+
+```{r 2.4.3_View_Skewness_of_Target_Variable}
+# view skewness of target variable to prevent from model getting bias towards the majority class
+
+#view summary of data
+summary(y_train_data_tn)
+
+#View the Skewness of the Tenure Data
+before_balance <- barplot(table(y_train_data_tn),main = "View the Skewness of the Tenure Data",xlab = "Tenura (num of years)",ylab = "Frequancy",col = "lightblue")
+
+boxplot(y_train_data_tn, main = "View the Skewness of the Tenure Data", ylab = "Frequancy", col = "lightgreen")
+
+
+```
+
+Since above box plot depict that sample mean X is slightly greater than M median which means this data is right skewed.
+
+### [**2.4.4 Handle Skewed Target Variable Data**]{.underline}
+
+```{r 2.4.4_Handle_Skewed_Target_Variable_Data}
+y_train_data_tn <- log(y_train_data_tn + 1)  # Avoid log(0) by adding 1
+
+```
+
+### [2.4.5 Train Model for Tenure prediction]{.underline}
+
+```{r 2.4.5_Model_Train_for_Tenure_prediction}
+library(e1071)
+
+#get selected features
+selected_features_tn <- rfe_result_tn$optVariables
+
+tn_model_data_train_rf = data.frame(y_train_data_tn,x_train_data_tn[,c(selected_features_tn)])
+tn_model_data_train_lm = data.frame(y_train_data_tn,x_train_data_tn)
+
+
+model_lm_rw <- lm(y_train_data_tn ~., data = tn_model_data_train_lm)
+
+model_lm <- lm(y_train_data_tn ~., data = tn_model_data_train_lm)
+stepwise_lm_model <- step(model_lm, direction = "both", trace = 0) 
+
+num_features <- ncol(x_train_data_tn[,c(selected_features_tn)]) 
+
+tuneGrid <- expand.grid(.mtry = 1:num_features)
+control <- trainControl(method = "cv", number = 5)
+
+# Train Random Forest with selected features
+random_frst_tn <- train(
+  y_train_data_tn ~., 
+  data = tn_model_data_train_rf, 
+  method = "rf", 
+  trControl = control,
+  tuneGrid = tuneGrid,
+  ntree = 300
+)
+  
+  
+
+#view the summary of the model
+print("Regression Model Summary")
+summary(stepwise_lm_model)
+
+print("Random Forest Model Summary")
+summary(random_frst_tn)
+```
+
+### [2.4.6 Model Evaluation for Tenure]{.underline}
+
+```{r 2.4.6_Model_Evaluation_for_Tenure}
+# predict the target variable using the trained model
+predictions <- predict(stepwise_lm_model, newdata = x_test_data_tn)
+
+predictions_rw <- predict(model_lm_rw, newdata = x_test_data_tn)
+
+predictions_r <- predict(random_frst_tn, newdata = x_test_data_tn[,c(selected_features_tn)])
+
+# cctual values from the test data
+actual <- y_test_data_tn
+
+# calculate mean absolute error (MAE)
+mae <- mean(abs(predictions - actual))
+cat("MAE LN with stepwise:", mae, "\n")
+
+mae_rw <- mean(abs(predictions_rw - actual))
+cat("MAE LN without stepwise:", mae_rw, "\n")
+
+mae_r <- mean(abs(predictions_r - actual))
+cat("MAE of RF:", mae_r, "\n")
+
+
+# calculate mean squared error (MSE)
+mse <- mean((predictions - actual)^2)
+cat("MSE LN with stepwise:", mse, "\n")
+
+mse_rw <- mean((predictions_rw - actual)^2)
+cat("MSE LN without stepwise:", mse_rw, "\n")
+
+mse_r <- mean((predictions_r - actual)^2)
+cat("MSE RF:", mse_r, "\n")
+
+# calculate root mean squared error (RMSE)
+rmse <- sqrt(mse)
+cat("RMSE LN with stepwise:", rmse, "\n")
+
+rmse_rw <- sqrt(mse_rw)
+cat("RMSE LN without stepwise:", rmse_rw, "\n")
+
+rmse_r <- sqrt(mse_r)
+cat("RMSE RF:", rmse_r, "\n")
+
+# calculate r-squared (R²)
+
+rf_r2 <- cor(predictions_r, y_test_data_tn)^2  
+rf_r2_rw <- cor(predictions_rw, y_test_data_tn)^2  
+rf_r2_lm <- cor(predictions, y_test_data_tn)^2  
+cat("RF rsq",rf_r2 ,"\n")
+cat("LN rsq with stepwise:",rf_r2_lm,"\n" )
+cat("LN rsq without stepwise:",rf_r2_rw,"\n" )
+
+
+
+
+```
+
+### [2.4.6 Model Performance Explanation for Tenure Prediction]{.underline}
+
+The data set was initially gathered not to predict customer tenure but to predict churn status, which is a yes/no result. However, we used three models; a Random Forest (RF) regression model and two Linear Regression (LM) models to try and predict tenure, which varies from one to ten years.
+
+1.  [**Mean Absolute Error (MAE):**]{.underline}
+
+    Mean Absolute Error is the average absolute difference between the predicted tenure and the actual tenure. The model evaluation results depict it as approximately 3.64 years. Since the tenure ranges from 1 to 10 years, an average error of about 3.64 years is very large. This error represents over 35% of the total range, meaning the model’s predictions are quite inaccurate.
+
+2.  [**Root Mean Squared Error (RMSE):**]{.underline}
+
+    The square root of the average squared differences between expected and actual values is identified as the root mean squared error. It gives more weight to larger errors. Model evaluation results depict it as approximately 4.45 years.  Since RMSE value of 4.45 years shows that prediction errors are nearly half the range of tenure. This again indicates significant prediction errors.
+
+3.  [**R-squared (R²):**]{.underline}  
+
+    R-squared means the proportion of the variation in tenure that the model can explain. According to the evaluation result of the model two models, it is approximately 0.0001 for the Random Forest and 0.0009 for the Linear Models. These values are nearly zero, meaning that the models do not explain any of the variability in tenure. In other words, the predictors used in the models do not have a meaningful relationship with tenure.
+
+The error values, (MAE of 3.64 and RMSE of 4.45) which are high indicate that the predictions are wrong by a large range compared to the small range of tenure (1–10 years). Additionally, the very low R² values show that the models are unable to capture the factors that influence tenure. This poor performance is likely because the data set designed for churn prediction, and the available features do not provide useful information for predicting how long a customer stays with the bank. For these reasons, both the Linear Model and the Random Forest model are not suitable for predicting tenure with this data set. The information would be more suitable for churn status forecasting since the characteristics are more relevant and probably will produce better predictive performance.
+
+# TASK 03
+
+## Task 3.1
+
+### [3.1.1 Load Data set]{.underline}
+
+```{r 3.1.1_Load_Data_set}
+
+load_dataset <- function(filepath, sep) {
+  return(read.table(filepath, sep = sep, header = TRUE, quote = "\"", stringsAsFactors = FALSE, na.strings = c("", "NA")))
+}
+```
+
+### [3.1.2 Implement Methods to Identify Qualitative and Quantitative Variables in the Data set]{.underline}
+
+```{r 3.1.2_Implement_Methods_to_Identify_Qualitative_and_Quantitative_Variables_in_the_Data_set}
+
+identify_quantitative_qualitative <- function (data,highest_num_cat){
+  feature_names <- names(data)
+  qualitative <- c()
+  quantitative <- c()
+
+  for (fr in feature_names) {
+      if(check_quantitative_qualitative(fr,data,highest_num_cat) == "quantitative"){
+        quantitative<- cbind(quantitative,c(fr))
+      } else if(check_quantitative_qualitative(fr,data,highest_num_cat) == "qualitative"){
+        qualitative <- cbind(qualitative,c(fr))
+      }
+    }
+    
+    return(list(quantitative= quantitative ,qualitative=qualitative))
+
+}
+
+
+check_quantitative_qualitative <- function(feature, data,highest_num_cat){
+  feature_data <- data[[feature]]
+  is_number <-  all((is.numeric(feature_data)|| is.double(feature_data)) && (length(unique(feature_data)) != length(feature_data) ) )
+  is_categorical <- ((length(unique(feature_data))) <= highest_num_cat)
+
+  if (is_categorical){
+    return("qualitative")
+
+  } else {
+     if(is_number) {
+        return("quantitative")
+     } else {
+        return("not-both")
+     }
+
+  } 
+  
+} 
+```
+
+### [3.1.3 Execution of Functions]{.underline}
+
+```{r 3.1.3_Execution_of_Functions}
+
+#/Users/naduniweerasinghe/CMM-703/candy-data.csv
+#/Users/naduniweerasinghe/CMM-703/Bank_Churn.csv
+#/Users/naduniweerasinghe/CMM-703/iris.csv"
+#/Users/naduniweerasinghe/CMM-703/mt-cars.csv"
+test_data_set <- load_dataset("/Users/naduniweerasinghe/CMM-703/Bank_Churn.csv", "," )
+
+res <- identify_quantitative_qualitative(test_data_set,3)
+res
+```
+
+## Task 3.2
+
+### [3.2.1 Method Implementation]{.underline}
+
+#### [3.2.1.1 Check if missing value exit in the feature]{.underline}
+
+```{r 3.2.1.1_Check_if_missing_value_exit_in_the_feature}
+
+#check if missing value exit in the feature
+check_for_missing_values <- function(feature){
+  return(sum(is.na(feature)) > 0)
+}
+
+```
+
+#### [3.2.1.2 Imputation method implementation for numerical data & categorical data]{.underline}
+
+```{r 3.2.1.2_Imputation_method_implementation_for_numerical_data_&_categorical_data}
+
+#imputation method for numerical data
+imputation_numeric <- function(feature,data){
+  num_mean <- mean(data[[feature]],na.rm = TRUE)
+  #cat(num_mean,"num_mean","\n")
+  check_num_na <- any(is.na(data[[feature]]))
+  #cat(feature,"feature","\n")
+
+  data[[feature]] <- ifelse(any(is.na(data[[feature]])), num_mean, data[[feature]])
+
+  data[[feature]][any(is.na(data[[feature]]))] <- num_mean
+  
+  return(data)
+}
+
+#imputation method for categorical data
+imputation_categorical <- function(feature,data){
+  cat_mode <- names(which.max(table(data[[feature]])))
+  #cat(feature,"feature","\n")
+
+  check_cat_na <- any(is.na(data[[feature]]))
+   if(length(cat_mode) > 0){
+    data[[feature]][is.na(data[[feature]])] <- cat_mode[1]
+   }else{
+    data[[feature]][is.na(data[[feature]])] <- cat_mode
+   }
+    return(data)
+  }
+```
+
+#### [3.2.1.3 Imputation method implementation]{.underline}
+
+```{r 3.2.1.3_Imputation_method_implementation}
+
+impute_missing_values <- function(data,highest_num_cat){
+  feature_names <- names(data)
+ 
+    for (fr in feature_names) {
+      
+       feature_data <- data[[fr]]
+       
+        if(check_for_missing_values(feature_data)){
+          
+          if(check_quantitative_qualitative(fr,data,highest_num_cat) == "quantitative"){
+            data <- imputation_numeric(fr,data)
+            
+          }else if(check_quantitative_qualitative(fr,data,highest_num_cat) == "qualitative"){
+            data <- imputation_categorical(fr,data)
+          }
+          
+        } else {
+          next
+        }
+    }
+    
+    return(data)
+ 
+  }
+```
+
+#### [3.2.1.4 Method execution]{.underline}
+
+```{r 3.2.1.4_Method_execution}
+
+cat("\n\n","BEFORE MISSING VALUE IMPUTATION","\n")
+colSums(is.na(test_data_set))
+head(test_data_set)
+
+#executing missing value imputation method
+new_dataset <- impute_missing_values(test_data_set,10)
+
+cat("\n \n","AFTER MISSING VALUE IMPUTATION","\n")
+colSums(is.na(new_dataset))
+head(new_dataset)
+
+```
+
+## Task 3.3
+
+### [3.3.1 Method implementation for outlier removal]{.underline}
+
+```{r 3.3.1_Method_implementation_for_outlier_removal}
+
+iqr_method <- function(data,feature){
+  
+  Q1_value <- quantile(data[[feature]], 0.25, na.rm = TRUE)
+  Q3_value <- quantile(data[[feature]], 0.75, na.rm = TRUE)
+  IQR_ <- Q3_value - Q1_value
+  
+  # find the lower bound and the upper bound
+  lower_bound_ <- Q1_value - 1.5 * IQR_
+  upper_bound_ <- Q3_value + 1.5 * IQR_
+ 
+  filtered_data_ <- data[data[[feature]] >= lower_bound_ & data[[feature]] <= upper_bound_, ]
+  return(filtered_data_)
+  
+}
+
+zcore_method <- function(data,feature){
+  mean_ <- mean(data[[feature]], na.rm = TRUE)  
+  standard_d <- sd(data[[feature]], na.rm = TRUE)  
+      
+  z_scores <- (data[[feature]] - mean_) / standard_d
+  
+  data <- data[which(abs(z_scores) > 3), ]
+
+  return(data)
+}
+
+outlier_remove <- function(highest_num_cat,data,outlier_method = "IQR"){
+   feature_names <- names(data)
+ 
+    for (fr in feature_names) {
+     if(check_quantitative_qualitative(fr,data,highest_num_cat) == "quantitative"){ 
+      if(tolower(outlier_method) == "zcore"){
+        data <- zcore_method(data,fr)
+      }else {
+        data <- iqr_method(data,fr) 
+      }
+     } else {
+       next
+     }
+      return(data)
+    }
+}
+
+
+```
+
+### [3.3.2 Method Execution]{.underline}
+
+```{r 3.3.2_Method_Execution}
+
+outlier_removed_new_dataset <- outlier_remove(10,new_dataset)
+
+for( fr in as.vector(res$quantitative)) {
+  outlier_removed_bx <-plot_ly(
+              data = outlier_removed_new_dataset,
+              y = ~outlier_removed_new_dataset[[fr]],  
+              type = 'box',
+              boxmean = TRUE  # Optionally show the mean inside the box plot
+            ) %>% layout(
+              title = paste("Box Plot of", fr),
+              yaxis = list(title = fr)
+            )
+  
+  print(outlier_removed_bx)
+}
+```
+
+## Task 3.4
+
+### [3.4.1 Implement Methods to View Data in Relevant Plots]{.underline}
+
+```{r 3.4.1_Implement_Methods_to_View_Data_in_Relevant_Plots}
+view_data_in_plot <- function(data, highest_num_cat) {
+  feature_names <- names(data)
+  quant_plots <- list()
+  qulitat_plot <- list()
+  
+  for (fr in feature_names) {
+    summary_data <- as.data.frame(table(data[[fr]]))
+    colnames(summary_data) <- c("Category", "Count")
+    
+    if (check_quantitative_qualitative(fr, data, highest_num_cat) == "quantitative") {
+      quantitative <- plot_ly(
+        data = data,
+        y = ~ data[[fr]],
+        type = "box",
+        boxmean = TRUE
+      ) %>% layout(
+        title = paste("Box Plot of", fr),
+        yaxis = list(title = fr)
+      )
+      
+      quantitative1 <- plot_ly(
+        data = data,
+        x = ~ data[[fr]],
+        type = "histogram"
+      ) %>% layout(
+        title = paste("Histogram", fr),
+        xaxis = list(title = fr),
+        yaxis = list(title = "Frequency"),
+        margin = list(b = 200),
+        bargap = 0.2
+      )
+      
+      quant_plots[[fr]] <-  quantitative1
+  
+      
+    } else if (check_quantitative_qualitative(fr, data, highest_num_cat) == "qualitative") {
+      qualitative <- plot_ly(
+        data = summary_data,
+        x = ~ Category,
+        y = ~ Count,
+        type = 'bar'
+      ) %>% layout(
+        title = paste("View Data of", fr),
+        xaxis = list(title = fr, tickangle = -45),
+        yaxis = list(title = "Count"),
+        margin = list(b = 200)
+      )
+      
+      qulitat_plot[[fr]] <- qualitative
+     
+    }
+  }
+  
+  return(list(quant_plots = quant_plots, qulitat_plot = qulitat_plot))
+}
+
+```
+
+### [3.4.2 Method Execution]{.underline}
+
+```{r 3.4.2_Method_Execution}
+res_p <- view_data_in_plot(outlier_removed_new_dataset,10)
+
+
+res_p
+
+
+```
+
+## Task 3.5
+
+### [3.5.1 Implement Methods to Predict Data for Given Variable]{.underline}
+
+#### [3.5.1.1 Remove Unwanted Columns]{.underline}
+
+```{r 3.5.1.1_Remove_Unwanted_Columns}
+
+remove_unwanted_columns <- function(data,highest_cat_level){
+ print(data)
+ qt_qlt <-  identify_quantitative_qualitative(data,highest_cat_level)
+ cbind_qt_qlt <- cbind(qt_qlt$quantitative,qt_qlt$qualitative)
+ 
+ return (data[,cbind_qt_qlt])
+}
+```
+
+#### [3.5.1.2 convert qualitative data to factors]{.underline}
+
+```{r 3.5.1.2_convert_qualitative_data_to_factors}
+
+convert_qualitative_data_to_factors <- function(data, highest_cat_level){
+  feature_names <- names(data)
+  
+    for(fr in feature_names){
+      if (check_quantitative_qualitative(fr, data, highest_cat_level) == "quantitative") {
+        next
+      } else if(check_quantitative_qualitative(fr, data, highest_cat_level) == "qualitative"){
+        
+        data[[fr]] <- factor(data[[fr]])
+      }
+    }
+  return(data)
+}
+
+```
+
+#### [3.5.1.3 Data Prepossessing]{.underline}
+
+```{r 3.5.1.1_Data_Preprocessing}
+data_preprocessing <- function(data, highest_cat_level) {
+  
+  plots <- view_data_in_plot(data, highest_cat_level)
+  
+  remove_unwanted_cols <- remove_unwanted_columns(data, highest_cat_level)
+  
+  df_without_missing_values <- impute_missing_values(remove_unwanted_cols, highest_cat_level)
+  
+  df_without_outliers <- outlier_remove(highest_cat_level, df_without_missing_values)
+  
+  factor_conversion <- convert_qualitative_data_to_factors(df_without_outliers,highest_cat_level)
+  return(list (df_without_outliers = factor_conversion, plots = plots))
+}
+
+```
+
+#### [3.5.1.4 Data Splitting]{.underline}
+
+```{r 3.5.1.2_Data_Splitting}
+
+data_splitting <- function(data, target_variable) {
+  set.seed(123)
+
+  train_index_ <- createDataPartition(data[[target_variable]], p = 0.8, list = FALSE)
+  
+  train_data <- data[train_index_, ]
+  test_data <- data[-train_index_, ]
+
+  
+  x_train <- train_data[, !(colnames(train_data) == target_variable)]
+  y_train <- train_data[, (colnames(train_data) == target_variable)]
+  y_test <- test_data[, (colnames(test_data) == target_variable)]
+  x_test <- test_data[, !(colnames(test_data) == target_variable)]
+
+  return(list(
+    x_train = x_train,
+    y_train = y_train,
+    y_test = y_test,
+    x_test = x_test
+  ))
+}
+```
+
+#### [3.5.1.5 Data Imbalance]{.underline}
+
+```{r 3.5.1.3_Data_Imbalance}
+fix_class_imbalance <- function(x_train, y_train) {
+  
+  cat(class(as.data.frame(x_train)))
+  x_train_df <- as.data.frame(x_train)
+  # Apply one-hot encoding (convert factors to dummy variables)
+  predict_vars <- x_train_df %>%
+    mutate(across(where(is.factor), as.numeric))
+  
+  print(dim(predict_vars))    # Should return rows and columns
+  print(length(y_train))
+  # Check the structure
+  str(predict_vars)
+  
+  # Apply SMOTE
+  smote_res <- SMOTE(
+    X = predict_vars,
+    target = y_train,
+    K = 2,
+    # Number of nearest neighbors
+    dup_size = 6
+  )          # Oversampling rate
+  
+  # Check class distribution after SMOTE
+  table(smote_result$data$class)
+  
+  # Check new class distribution
+  before_balance
+  class_counts <- table(smote_result$data$class)
+  
+  return((smote_res))
+  
+}
+
+```
+
+#### [3.5.1.6 Feature Selection]{.underline}
+
+```{r 3.5.1.4_Feature_Selection}
+
+feature_selection_for_model <- function(x_train, y_train) {
+  x_train_df <- as.data.frame(x_train)
+  # Apply one-hot encoding (convert factors to dummy variables)
+  x_train_df <- x_train_df %>%
+    mutate(across(where(is.factor), as.numeric))
+  # Define RFE control using cross-validation
+  ctrl_ <- rfeControl(functions = rfFuncs,
+                      method = "cv",
+                      number = 5)
+  
+  
+  # Run RFE on training data
+  rfe_res <- rfe(x_train_df,
+                 # Exclude target variable
+                 y_train,
+                 # Target variable
+                 sizes = c(1:5),
+                 # Number of features to select (1 to 5)
+                 rfeControl = ctrl_)
+  
+  # Print the selected features
+  print(rfe_res)
+  return(as.vector(rfe_res$optVariables))
+}
+```
+
+#### [3.5.1.7 Run Best Model Method Implement]{.underline}
+
+```{r 3.5.1_Implement_Methods_to_Predict_Data_for_Given_Variable}
+
+select_and_run_best_model <- function(target_variable, data, highest_num_cat) {
+  force(data)
+  is_feature_exist <- target_variable %in% colnames(data)
+  
+  y_check <- data[[target_variable]]
+  is_binary <- ((is.factor(y_check) && length(levels(y_check)) == 2) || 
+              (is.numeric(y_check) && length(unique(y_check)) == 2))
+  
+  if (!any(is_feature_exist)) {
+    print(paste(target_variable, " is not Found in the Data set"))
+  } 
+  else {
+    
+    cleaned_data <- data_preprocessing(data, highest_num_cat)
+    splited_d <- data_splitting(cleaned_data$df_without_outliers, target_variable)
+    fr_selected <- feature_selection_for_model(splited_d$x_train, splited_d$y_train)
+ 
+
+    x_train_fr_selected <- splited_d$x_train[, fr_selected]
+    x_test_fr_selected <- splited_d$x_test[, fr_selected]
+
+    train_model_data_rf <- data.frame(x_train_fr_selected, y_train = splited_d$y_train)
+    train_model_data_lm <- data.frame(splited_d$x_train, y_train = splited_d$y_train)
+        
+
+    
+    if (check_quantitative_qualitative(target_variable, data,highest_num_cat) == "quantitative") {
+      
+      ln_model <- lm(y_train ~., data = train_model_data_lm)
+      stepwise_ln_new <- step(ln_model, direction = "both", trace = 0) 
+      
+      num_fr <- ncol(x_train_fr_selected) 
+      
+      tuneGrid <- expand.grid(.mtry = 1:num_fr)
+      control <- trainControl(method = "cv", number = 5)
+      
+      random_fmodel <- train(
+        y_train ~., 
+        data = train_model_data_rf, 
+        method = "rf", 
+        trControl = control,
+        tuneGrid = tuneGrid,
+        ntree = 300
+      )
+      
+      pred_rf <- predict(random_fmodel, newdata = x_test_fr_selected)
+      pred_lm <- predict(stepwise_ln_new, newdata = splited_d$x_test)
+      
+      rmse_lm <- sqrt(mean((pred_lm - splited_d$y_test)^2))
+      rmse_rf <- sqrt(mean((pred_rf - splited_d$y_test)^2))
+      
+      best_model_type <- names(which.min(c(LM = rmse_lm, RF = rmse_rf)))
+      
+      if (best_model_type == "LM") {
+        chosen_model <- ln_model
+        chosen_preds <- pred_lm
+      } else {
+        chosen_model <- random_fmodel
+        chosen_preds <- pred_rf
+      }
+      
+      model_summary <- capture.output(summary(chosen_model))
+      
+      performance <- paste("RMSE LM =", round(rmse_lm, 2),
+                         "| RMSE RF =", round(rmse_rf, 2),
+                         "| Selected:", best_model_type)
+      
+      pred_real <- function() {
+        plot_ly(x = splited_d$y_test, y = chosen_preds, type = 'scatter', mode = 'markers') %>%
+        layout(
+          title = "Observed vs. Predicted",
+          xaxis = list(title = "Observed Values"),
+          yaxis = list(title = "Predicted Values"),
+          shapes = list(
+            list(
+              type = "line",
+              x0 = min(splited_d$y_test), x1 = max(splited_d$y_test),
+              y0 = min(splited_d$y_test), y1 = max(splited_d$y_test),
+              line = list(dash = "dot", width = 2)
+            )
+          )
+        )
+      }
+      
+      return(list(
+        response_type = "continuous",
+        best_model = chosen_model,
+        model_type = best_model_type,
+        predictions = chosen_preds,
+        performance = performance,
+        model_summary = model_summary,
+        plot_list = cleaned_data$plots,
+        pred_vs_real = pred_real
+      ))
+      
+    } else if ( is_binary && check_quantitative_qualitative(target_variable, data,highest_num_cat ) == "qualitative") {
+
+    glm_model <- glm(y_train ~ ., data = train_model_data_lm, family = binomial)
+    stepwise_glm_model <- step(glm_model, direction = "both", trace = 0)
+
+
+    rf_bi_model <- randomForest(
+      y = splited_d$y_train,
+      x = x_train_fr_selected,
+      ntree = 500,
+      mtry = 2,
+      sampsize = c(length(x_train_fr_selected)/2, length(x_train_fr_selected)/2),
+      replace = TRUE
+    )
+
+    glm_pred <- predict(stepwise_glm_model, splited_d$x_test, type = "response")
+    glm_pred_class <- ifelse(glm_pred > 0.5, 1, 0)
+    glm_pred_class <- as.factor(glm_pred_class)
+
+    rf_bi_pred <- predict(rf_bi_model, x_test_fr_selected, type = "prob")[,2]
+    rf_bi_pred_class <- ifelse(rf_bi_pred > 0.5, 1, 0)
+    rf_bi_pred_class <- factor(rf_bi_pred_class)
+
+    # evaluate Performance
+    glm_cm <- confusionMatrix(glm_pred_class, splited_d$y_test, positive = "1")
+    rf_bi_cm <- confusionMatrix(rf_bi_pred_class, splited_d$y_test, positive = "1")
+
+    rf_bi_roc <- roc(splited_d$y_test, rf_bi_pred)
+    glm_roc <- roc(splited_d$y_test, glm_pred)
+
+
+    glm_auc <- auc(glm_roc)
+    rf_bi_auc <- auc(rf_bi_roc)
+
+    best_model_type <- names(which.min(c(GLM = glm_auc, RF = rf_bi_auc)))
+
+
+    if (best_model_type == "GLM") {
+      chosen_model <- glm_model
+      performance <- paste("AUC GLM =", round(glm_auc, 3))
+      model_auc <- glm_auc
+      model_roc <- glm_roc
+      model_name <- "Logistic Regression"
+      model_cm <- glm_cm
+      chosen_pred <- glm_pred
+    } else {
+      chosen_model <- rf_bi_model
+      performance <- paste("AUC RF =", round(rf_bi_auc, 3))
+      model_auc <- rf_bi_auc
+      model_roc <- rf_bi_roc
+      model_name <- "Random Forest"
+      model_cm <- rf_bi_cm
+      chosen_pred <-rf_bi_pred
+    }
+    model_summary <- capture.output(summary(chosen_model))
+
+    roc_data <- data.frame(
+      Model = model_name,
+      FPR = c(1 - model_roc$specificities),
+      TPR = c(model_roc$sensitivities)
+    )
+
+    roc_plt <- function(){
+      
+      plot_ly(roc_data, x = ~FPR, y = ~TPR, type = "scatter", mode = "lines", color = ~Model) %>%
+      layout(
+        title = paste("ROC Curve Comparison (AUC", model_name, ":", round(model_auc, 3), ")"),
+        xaxis = list(title = "False Positive Rate"),
+        yaxis = list(title = "True Positive Rate")
+      )
+    }
+    
+    return(list(
+      response_type = "binary",
+      best_model = chosen_model,
+      model_type = best_model_type,
+      predictions = chosen_pred,
+      performance = performance,
+      confusion_matrix = model_cm,
+      model_summary = model_summary,
+      roc_plot = roc_plt,
+      plot_list = cleaned_data$plots
+    ))
+      
+    } else {
+      print("This Method is design for Binary Classification")
+    }
+  }
+}
+```
+
+#### [3.5.1.8 Execute Method to Check]{.underline}
+
+```{r method_execution_run_model}
+ 
+select_and_run_best_model("Exited",test_data_set,3)
+
+```
+
+## Task 3.6
+
+### [3.6.1 Shiny app implementation]{.underline}
+
+```{r shiny-app}
+
+ui <- fluidPage(
+  titlePanel("Auto Model Selection Dashboard"),
+  
+  
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("datafile", "Upload CSV", accept = ".csv"),
+      selectInput("target_var", "Select Response Variable", choices = NULL),
+      numericInput("highest_category_count", "Max Category Count", value = 10, min = 2),
+      actionButton("run_model", "Run Best Model")
+    ),
+    
+    mainPanel(
+      fluidRow(
+        column(width = 12,
+           wellPanel(
+                 h3("Quantitative Features Plot List"),
+                 uiOutput("quant_plots")
+          )
+        )
+      ),
+    fluidRow(
+        column(width = 12,
+           wellPanel(
+                 h3("Qualitative Features Plot List"),
+                 uiOutput("qulitat_plot")
+          )
+        )
+      ),
+      # First row: Model summary and model results side-by-side
+      fluidRow(
+        column(width = 6,
+               wellPanel(
+                 h3("Model Summary"),
+                 verbatimTextOutput("model_summary")
+               )
+        ),
+        column(width = 6,
+               wellPanel(
+                 h3("Model Confusion Metrics"),
+                 DTOutput("confMat")
+               )
+        )
+      ),
+      # Second row: Preprocessing plots full width
+      fluidRow(
+        column(width = 12,
+               wellPanel(
+                 h3("ROC/Observed vs. Predicted plot"),
+                 plotlyOutput("rocPlot")
+               )
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Reactive: Load data from uploaded CSV file
+  upload_dataset <- reactive({
+    req(input$datafile)
+    read.table(input$datafile$datapath,
+               sep = ",",
+               header = TRUE,
+               quote = "\"",
+               stringsAsFactors = FALSE,
+               na.strings = c("", "NA"))
+  })
+  
+  # Update target variable choices once the dataset is loaded
+  observe({
+    req(upload_dataset())    
+    updateSelectInput(session, "target_var", choices = names(upload_dataset()))
+    updateSelectInput(session, "highest_category_count", choices = names(upload_dataset()))
+
+  })
+  
+  observe({
+   req(results())
+   qulitat_plots <- results()$plot_list$qulitat_plot
+    lapply(1:length(qulitat_plots), function(i) {
+      output[[ paste("qulitat_plot", i, sep = "") ]] <- renderPlotly({
+        qulitat_plots[[i]]
+      })
+    })
+  })
+  
+  observe({
+   req(results())
+   quant_plots <- results()$plot_list$quant_plots
+    lapply(1:length(quant_plots), function(i) {
+      output[[ paste("quant_plot_", i, sep = "") ]] <- renderPlotly({
+        quant_plots[[i]]
+      })
+    })
+  })
+  
+  # Run model when the "Run Best Model" button is clicked
+  results <- eventReactive(input$run_model, {
+    req(upload_dataset(), input$target_var)
+    select_and_run_best_model(input$target_var, upload_dataset(), input$highest_category_count)
+  })
+  
+  # Display model summary output (best model info)
+    output$model_summary <- renderPrint({
+    req(results())
+    list(
+    Model_Type = results()$model_type,
+    Performance = results()$performance,
+    Model_Summary = results()$model_summary
+    )
+  })
+    
+  output$confMat <- renderDT({
+    req(results())
+    if (results()$response_type == "binary") {
+      as.data.frame(results()$confusion_matrix$table)
+    }
+  })
+  
+  output$rocPlot <- renderPlotly({
+    req(results())
+    if (results()$response_type == "binary") {
+      results()$roc_plot()
+    } else {
+      results()$pred_vs_real()
+    }
+  })
+  
+output$quant_plots <- renderUI({
+  req(results())
+  quant_plots <- results()$plot_list$quant_plots
+  lapply(1:length(quant_plots), function(i) {
+      plotlyOutput(outputId = paste("quant_plot_", i, sep = ""))
+    })
+})
+
+output$qulitat_plot <- renderUI({
+  
+  req(results())
+  qulitat_plots <- results()$plot_list$qulitat_plot
+  lapply(1:length(qulitat_plots), function(i) {
+      plotlyOutput(outputId = paste("qulitat_plot", i, sep = ""))
+    })
+
+})
+  
+
+}
+
+
+shinyApp(ui, server)
+
+```
